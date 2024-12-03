@@ -6,6 +6,8 @@ import requests
 import datetime
 import json
 
+import asyncio
+
 os.system("cls")
 
 class Alarm:
@@ -89,6 +91,12 @@ class Umbrella:
             raise ConnectionError("네트워크 또는 API 요청 오류:", e)
         except ValueError:
             raise ValueError("JSON 응답이 비어있거나 형식이 잘못되었습니다.")
+        
+    async def send_rainable(self):
+        while True:
+            now = datetime.datetime.now()
+            if now.hour == 6 and now.minute == 0:
+                self.arduino.write(bytes("1" if self.will_it_rain() else "0", 'utf-8'))
 
 def main():
     arduino = serial.Serial(port="COM5", baudrate=9600, timeout=0.1)
@@ -99,14 +107,16 @@ def main():
     if (input("Enter 'y' after setting up Arduino: ") == 'y'): # 입력 하고 너무 빠르게 엔터를 누르면 안 됨
         alarm.send_initial_time()
 
-    if (input("Enter 'y' to check the weather: ") == 'y'):
+    """ if (input("Enter 'y' to check the weather: ") == 'y'):
         try:
             if umbrella.will_it_rain():
                 print("비가 내릴 수 있습니다.")
             else:
                 print("비가 내리지 않을 것입니다.")
         except Exception as e:
-            print(f"error occured: {e}")
+            print(f"error occured: {e}") """
+    
+    asyncio.run(umbrella.send_rainable())
 
 if __name__ == "__main__":
     main()

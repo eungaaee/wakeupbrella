@@ -1,149 +1,99 @@
-// 아두이노->컴퓨터로 시리얼 통신 할 때 Serial.println() 사용하면 오류 발생. Serial.print() 사용하기
-#include <IRremote.h>
-#include <time.h>
+#include <Servo.h>
 #define DEBUG_MODE
 
-// remote
-int recvPin = 7;
-decode_results result;
-IRrecv irrecv(recvPin);
+Servo servo;
+int servo_pin = 2;
 
-// alarm
-struct {
-    int hour;
-    int minute;
-} cur_time = {-1, -1};
-int hhmm[4], hhmm_idx;
-bool is_alarm_setting = false;
-bool is_alarm_set = false;
+bool rainable = true;
+bool is_closed = true;
 
-// water pump
-int AA = 10;
-int AB = 9;
+const int trig_pin = 4;
+const int echo_pin = 5;
 
-// test led
-int led_pin = 8;
+bool IsNear(int threshold = 25) {
+    digitalWrite(trig_pin, HIGH);
+    delayMicroseconds(10); // 10us
+    digitalWrite(trig_pin, LOW);
 
-int result_to_int(long unsigned int res) {
-    int num;
-    
-    if (res == 0xFF6897) num = 0;
-    else if (res == 0xFF30CF) num = 1;
-    else if (res == 0xFF18E7) num = 2;
-    else if (res == 0xFF7A85) num = 3;
-    else if (res == 0xFF10EF) num = 4;
-    else if (res == 0xFF38C7) num = 5;
-    else if (res == 0xFF5AA5) num = 6;
-    else if (res == 0xFF42BD) num = 7;
-    else if (res == 0xFF4AB5) num = 8;
-    else if (res == 0xFF52AD) num = 9;
+    unsigned long duration = pulseIn(echo_pin, HIGH);
+    unsigned long distance = duration / 58;
 
-    return num;
+#ifdef DEBUG_MODE
+    Serial.print(distance);
+    Serial.println("cm");
+#endif
+
+    delay(100);
+
+    if (distance <= threshold) return true;
+    else return false;
 }
 
-void set_alarm() {
-    if (irrecv.decode(&result)) {
-        switch (result.value) {
-            case 0xFF906F:  // EQ
-                is_alarm_setting = !is_alarm_setting;
-                break;
-            case 0xFFE01F:  // -
-                if (is_alarm_setting && hhmm_idx > 0)
-                    hhmm[--hhmm_idx] = 0;
-                break;
-            case 0xFFC23D:  // Play
-                is_alarm_setting = !is_alarm_setting;
-                is_alarm_set = !is_alarm_set;
-                break;
-            case 0xFF6897:  // 0
-            case 0xFF30CF:  // 1
-            case 0xFF18E7:  // 2
-            case 0xFF7A85:  // 3
-            case 0xFF10EF:  // 4
-            case 0xFF38C7:  // 5
-            case 0xFF5AA5:  // 6
-            case 0xFF42BD:  // 7
-            case 0xFF4AB5:  // 8
-            case 0xFF52AD:  // 9
-                if (is_alarm_setting && hhmm_idx < 4) {
-                    int input_num = result_to_int(result.value);
-                    hhmm[hhmm_idx++] = input_num;
-                }
-                break;
-            default:
-                break;
-        }
-
-        /* for (int i = 0; i < 4; i++) Serial.print(hhmm[i]);
-        Serial.println(); */
-
+void UpdateRainable() {
+    /* if (cur_time.hour == 6 && cur_time.minute == 0) {
+        while (Serial.available());
         delay(250);
-        irrecv.resume();
-    }
+
+        rainable = Serial.parseInt();
+    }  */
+#ifdef DEBUG_MODE
+    rainable = true;
+#endif
 }
 
-void update_time() {
-    static unsigned long elapsed_time;
+void OpenStand() {
+#ifdef DEBUG_MOD
+    Serial.println("OPEN");
+#endif
+    servo.write(0);    // 시계 회전
+    delay(400);
+    servo.write(90);   // 정지
 
-    if (cur_time.hour == -1 && cur_time.minute == -1) {
-        while (!Serial.available());
-        delay(250);  // 모든 바이트가 전송되었을 때 까지 기다리기
+    is_closed = false;
+}
 
-        /* String raw = Serial.readString();
-        cur_time.hour = raw.substring(0, 2).toInt();
-        cur_time.minute = raw.substring(2, 4).toInt(); */
-        cur_time.hour = Serial.parseInt();
-        cur_time.minute = Serial.parseInt();
+void CloseStand() {
+#ifdef DEBUG_MOD
+    Serial.println("CLOSE");
+#endif
+    servo.write(180); // 반시계
+    delay(400);
+    servo.write(90); // 정지
 
-        #ifdef DEBUG_MODE
-            if (cur_time.hour < 10) Serial.print('0');
-            Serial.print(cur_time.hour);
-            Serial.print(':');
-            if (cur_time.minute < 10) Serial.print('0');
-            Serial.println(cur_time.minute);
-        #endif
+    is_closed = true;
+}
+
+void Umbrella(int in_a_row = 5) {
+    static int near_count, far_count;
+
+    if (IsNear(25)) {
+      near_count++;
+      far_count = 0;
     } else {
-        if (millis() - elapsed_time >= 60000) {
-            cur_time.minute++;
-            if (cur_time.minute == 60) {
-                cur_time.minute = 0;
-                cur_time.hour++;
-                if (cur_time.hour == 24)
-                    cur_time.hour = 0;
-            }
-            elapsed_time = millis();
-        }
+      far_count++;
+      near_count = 0;
     }
-}
 
-bool check_alarm() {
-}
+    if (rainable && is_closed && near_count >= in_a_row) {
+        near_count = 0;
+        OpenStand();
+    }
 
-void water() {
-    digitalWrite(AA, HIGH);
-    digitalWrite(AB, LOW);
-    delay(3000);
-    digitalWrite(AA, LOW);
-    digitalWrite(AB, LOW);
-    delay(3000);
+    if (!is_closed && far_count >= in_a_row) {
+        far_count = 0;
+        CloseStand();
+    }
 }
 
 void setup() {
     Serial.begin(9600);
-    Serial.setTimeout(1);
 
-    irrecv = IRrecv(recvPin);
-    irrecv.enableIRIn();
+    pinMode(trig_pin, OUTPUT);
+    pinMode(echo_pin, INPUT);
 
-    pinMode(AA, OUTPUT);
-    pinMode(AB, OUTPUT);
-
-    pinMode(led_pin, OUTPUT);
+    servo.attach(servo_pin);
 }
 
 void loop() {
-    update_time();
-
-    set_alarm();
-    if (is_alarm_set) check_alarm();
+    Umbrella();
 }
