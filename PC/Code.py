@@ -19,9 +19,10 @@ class Alarm:
         print(f"Sending : {current_time}")
         self.arduino.write(bytes(current_time, 'utf-8'))
 
-        time.sleep(0.5) # 모든 바이트가 전송되었을 때 까지 기다리기
-        received = self.arduino.readline().decode('utf-8')
-        print(f"Received : {received}")
+        time.sleep(2) # *중요: 모든 바이트가 전송되었을 때 까지 기다리기
+        if (self.arduino.readable()):
+            received = self.arduino.readline().decode('utf-8')
+            print(f"Received : {received}")
 
 class Umbrella:
     BASE_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
@@ -95,7 +96,7 @@ class Umbrella:
     async def send_rainable(self):
         while True:
             now = datetime.datetime.now()
-            if now.hour == 6 and now.minute == 0:
+            if now.hour == 16 and now.minute == 46:
                 self.arduino.write(bytes("1" if self.will_it_rain() else "0", 'utf-8'))
 
 def main():
@@ -107,7 +108,8 @@ def main():
     if (input("Enter 'y' after setting up Arduino: ") == 'y'): # 입력 하고 너무 빠르게 엔터를 누르면 안 됨
         alarm.send_initial_time()
 
-    """ if (input("Enter 'y' to check the weather: ") == 'y'):
+    # asyncio.run(umbrella.send_rainable())
+    """ if (input("Enter 'y' to send the weather: ") == 'y'):
         try:
             if umbrella.will_it_rain():
                 print("비가 내릴 수 있습니다.")
@@ -116,7 +118,7 @@ def main():
         except Exception as e:
             print(f"error occured: {e}") """
     
-    asyncio.run(umbrella.send_rainable())
+    arduino.close()
 
 if __name__ == "__main__":
     main()
