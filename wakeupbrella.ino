@@ -1,5 +1,7 @@
 #include <Servo.h>
-#define ALARM_DEBUG
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#define UMBRELLA_DEBUG
 
 // Both
 struct hour_minute {
@@ -9,6 +11,15 @@ struct hour_minute {
 
 struct hour_minute clock = {-1, -1};
 struct hour_minute alarm_time = {0, 0};
+
+enum ALARM_STATUS { NOT_SET, SETTING_HOUR, SETTING_MINUTE, ALARM_SET, CLOCK_UPDATED };
+enum ALARM_STATUS status;
+bool display_updated = false;
+
+void ChangeStatus(enum ALARM_STATUS new_status) {
+    if (new_status != CLOCK_UPDATED) status = new_status;
+    display_updated = true;
+}
 
 void UpdateTime() {
     static unsigned long elapsed_time;
@@ -27,20 +38,21 @@ void UpdateTime() {
     if (clock.minute < 10) Serial.print('0');
     Serial.print(clock.minute);
 #endif
-    } else {
-        if (millis() - elapsed_time >= 60000) {  // 1분이 지날 때마다 시간 업데이트
-            clock.minute++;
-            if (clock.minute == 60) {
-                clock.minute = 0;
-                clock.hour++;
-                if (clock.hour == 24)
-                    clock.hour = 0;
-            }
-            elapsed_time = millis();
+        ChangeStatus(CLOCK_UPDATED);
+    } else if (millis() - elapsed_time >= 60000) {  // 1분이 지날 때마다 시간 업데이트
+        clock.minute++;
+        if (clock.minute == 60) {
+            clock.minute = 0;
+            clock.hour++;
+            if (clock.hour == 24)
+                clock.hour = 0;
         }
+        elapsed_time = millis();
+
+        ChangeStatus(CLOCK_UPDATED);
     }
 
-    delay(100);
+    // delay(100);
 }
 
 // Umbrella
@@ -66,7 +78,7 @@ bool IsNear(int threshold = 25) {
     Serial.println("cm");
 #endif
 
-    delay(100);
+    // delay(100);
 
     if (distance <= threshold) return true;
     else return false;
@@ -133,20 +145,23 @@ void Umbrella(const int in_a_row = 5) {
 // Alarm
 const int buzzer_pin = 12;
 const int waterpump_A_pin = 10, waterpump_B_pin = 6;
-const int decrease_button_pin = 7, increase_button_pin = 8, confirm_button_pin = 9;
-const int pressure_pin = A5;
+const int decrease_button_pin = 7, increase_button_pin = 8, confirm_button_pin = 9, cancel_button_pin = 13;
+const int pressure_pin = A3;
+
+LiquidCrystal_I2C lcd(0x27, 20, 4); // 0x3F 또는 0x27
 
 bool alarm_setting = false, alarm_set = false;
-bool alarmed = false;
+bool alarming = false;
+bool watered = false;
 
-void Water() {
-    // Hydro-pump
-    digitalWrite(waterpump_A_pin, HIGH);
-    digitalWrite(waterpump_B_pin, LOW);
-
-    /* // Stop
-      digitalWrite(AA, LOW);
-      digitalWrite(AB, LOW); */
+void Water(bool on_off) {
+    if (on_off == true) { // Hydro-pump
+        digitalWrite(waterpump_A_pin, HIGH);
+        digitalWrite(waterpump_B_pin, LOW);
+    } else { // Stop
+        digitalWrite(waterpump_A_pin, LOW);
+        digitalWrite(waterpump_B_pin, LOW);
+    }
 }
 
 void SetAlarm() {
@@ -163,11 +178,13 @@ void SetAlarm() {
 
     if (alarm_set && confirm_button_status) {
         alarm_set = false;
+        ChangeStatus(NOT_SET);
         return;
     } else if (!alarm_setting && confirm_button_status) {
         alarm_setting = true;
         hour_set = false;
         minute_set = false;
+        ChangeStatus(SETTING_HOUR);
         return;
     }
 
@@ -178,7 +195,7 @@ void SetAlarm() {
                 if (alarm_time.hour < 0) {
                     alarm_time.hour = 23;
                 }
-                // delay(100);  // Debounce delay
+                ChangeStatus(SETTING_HOUR);
             }
 
             if (increase_button_status) {
@@ -186,43 +203,41 @@ void SetAlarm() {
                 if (alarm_time.hour >= 24) {
                     alarm_time.hour = 0;
                 }
-                // delay(100);
+                ChangeStatus(SETTING_HOUR);
             }
 
             if (confirm_button_status) {
-                Serial.println("시간 설정 확인");
                 hour_set = true;
-                // delay(100);
+                ChangeStatus(SETTING_MINUTE);
             }
         } else if (!minute_set) {
             if (decrease_button_status) {
-                alarm_time.minute -= 10;
+                alarm_time.minute--;
                 if (alarm_time.minute < 0) {
-                    alarm_time.minute = 50;
+                    alarm_time.minute = 59;
                 }
-                // delay(100);  // Debounce delay
+                ChangeStatus(SETTING_MINUTE);
             }
 
             if (increase_button_status) {
-                alarm_time.minute += 10;
+                alarm_time.minute++;
                 if (alarm_time.minute >= 60) {
                     alarm_time.minute = 0;
                 }
-                // delay(100);
+                ChangeStatus(SETTING_MINUTE);
             }
 
             if (confirm_button_status) {
-                Serial.println("분 설정 확인");
                 minute_set = true;
                 alarm_setting = false;
                 alarm_set = true;
-                // delay(100);
+                ChangeStatus(ALARM_SET);
             }
         }
     }
 }
 
-bool IsSleeping(int threshold = 500) {
+bool IsSleeping(int threshold = 800) {
     if (analogRead(pressure_pin) <= threshold) return true;
     else return false;
 }
@@ -230,13 +245,59 @@ bool IsSleeping(int threshold = 500) {
 void Alarm() {
     static unsigned long rang_time;
 
-    if (!alarmed && clock.hour == alarm_time.hour && clock.minute == alarm_time.minute) {
+    if (alarm_set && !alarming && clock.hour == alarm_time.hour && clock.minute == alarm_time.minute) {
         tone(buzzer_pin, 261);
         rang_time = millis();
-        alarmed = true;
+        alarming = true;
     }
 
-    if (alarmed && (millis() - rang_time >= 30000) && IsSleeping()) Water();
+    if (alarming && !watered && IsSleeping() && millis() - rang_time >= 10000) {
+        Water(true);
+        watered = true;
+    }
+
+    bool cancel_button = digitalRead(cancel_button_pin);
+
+    if (((watered && alarming && !IsSleeping()) || (!watered && alarming)) && cancel_button) {
+        noTone(buzzer_pin);
+        Water(false);
+        alarming = false;
+        alarm_set = false;
+        watered = false;
+        ChangeStatus(NOT_SET);
+    }
+}
+
+void UpdateDisplay() {
+    if (!display_updated) return;
+    display_updated = false;
+    lcd.clear();
+
+    // show current time
+    lcd.setCursor(0, 0);
+    lcd.print("Clock: ");
+    if (clock.hour < 10) lcd.print('0');
+    lcd.print(clock.hour);
+    lcd.print(':');
+    if (clock.minute < 10) lcd.print('0');
+    lcd.print(clock.minute);
+
+    // show alarm time
+    lcd.setCursor(0, 1);
+    lcd.print("Alarm: ");
+    if (alarm_time.hour < 10) lcd.print('0');
+    lcd.print(alarm_time.hour);
+    lcd.print(':');
+    if (alarm_time.minute < 10) lcd.print('0');
+    lcd.print(alarm_time.minute);
+
+    // show status
+    lcd.setCursor(0, 3);
+    lcd.print("Status: ");
+    if (status == NOT_SET) lcd.print("Not Set");
+    else if (status == SETTING_HOUR) lcd.print("Hour");
+    else if (status == SETTING_MINUTE) lcd.print("Minute");
+    else if (status == ALARM_SET) lcd.print("Alarm Set");
 }
 
 void setup() {
@@ -257,6 +318,11 @@ void setup() {
     pinMode(confirm_button_pin, INPUT_PULLUP);
 
     pinMode(pressure_pin, INPUT);
+
+    lcd.init();
+    lcd.backlight();
+
+    ChangeStatus(NOT_SET);
 }
 
 void loop() {
@@ -264,6 +330,7 @@ void loop() {
     
     SetAlarm();
     Alarm();
+    UpdateDisplay();
 
     UpdateRainable();
     Umbrella();
