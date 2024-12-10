@@ -1,7 +1,7 @@
 #include <Servo.h>
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
-#define UMBRELLA_DEBUG
+#define PREVIEW_MODE
 
 // Both
 struct hour_minute {
@@ -15,6 +15,7 @@ struct hour_minute alarm_time = {0, 0};
 enum ALARM_STATUS { NOT_SET, SETTING_HOUR, SETTING_MINUTE, ALARM_SET, CLOCK_UPDATED };
 enum ALARM_STATUS status;
 bool display_updated = false;
+bool rainable = false;
 
 void ChangeStatus(enum ALARM_STATUS new_status) {
     if (new_status != CLOCK_UPDATED) status = new_status;
@@ -59,7 +60,6 @@ void UpdateTime() {
 Servo servo;
 int servo_pin = 2;
 
-bool rainable = false;
 bool is_closed = true;
 
 const int trig_pin = 4;
@@ -93,30 +93,24 @@ void UpdateRainable() {
         else rainable = false;
     }
 
-#ifdef UMBRELLA_DEBUG
+#if defined(UMBRELLA_DEBUG) || defined(PREVIEW_MODE)
     rainable = true;
 #endif
 }
 
 void OpenStand() {
-#ifdef DEBUG_MOD
+#ifdef UMBRELLA_DEBUG
     Serial.println("OPEN");
 #endif
-    servo.write(0);  // 시계 회전
-    delay(400);
-    servo.write(90);  // 정지
-
+    servo.write(0);
     is_closed = false;
 }
 
 void CloseStand() {
-#ifdef DEBUG_MOD
+#ifdef UMBRELLA_DEBUG
     Serial.println("CLOSE");
 #endif
-    servo.write(180);  // 반시계
-    delay(400);
-    servo.write(90);  // 정지
-
+    servo.write(180);
     is_closed = true;
 }
 
@@ -145,7 +139,7 @@ void Umbrella(const int in_a_row = 5) {
 // Alarm
 const int buzzer_pin = 12;
 const int waterpump_A_pin = 10, waterpump_B_pin = 6;
-const int decrease_button_pin = 7, increase_button_pin = 8, confirm_button_pin = 9, cancel_button_pin = 13;
+const int decrease_button_pin = 8, increase_button_pin = 7, confirm_button_pin = 9, cancel_button_pin = 13;
 const int pressure_pin = A3;
 
 LiquidCrystal_I2C lcd(0x27, 20, 4); // 0x3F 또는 0x27
@@ -298,6 +292,11 @@ void UpdateDisplay() {
     else if (status == SETTING_HOUR) lcd.print("Hour");
     else if (status == SETTING_MINUTE) lcd.print("Minute");
     else if (status == ALARM_SET) lcd.print("Alarm Set");
+
+    // show weather
+    lcd.setCursor(19, 0);
+    if (rainable) lcd.print("R"); // rainy
+    else lcd.print("S"); // sunny
 }
 
 void setup() {
@@ -330,10 +329,11 @@ void loop() {
     
     SetAlarm();
     Alarm();
-    UpdateDisplay();
 
     UpdateRainable();
     Umbrella();
+
+    UpdateDisplay();
     
     delay(100);
 }
