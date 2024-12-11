@@ -39,16 +39,16 @@ class Umbrella:
             return data['KEY']
 
     def get_latest_base_time(self, now):
-        forecast_times = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"]
+        forecast_times = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"] # 발표 시간. API 제공 시간은 10분 뒤
         
         for time in reversed(forecast_times):
-            if now.strftime("%H%M") >= time:
+            if (now - datetime.timedelta(minutes=10)).strftime("%H%M") >= time: # 현재 시간보다 10분 전인 시간을 기준으로
                 return time
             
         # 만약 현재 시간이 0200 이전이면, 가장 마지막 발표 시간인 2300으로 설정
         return forecast_times[-1]
 
-    def will_it_rain(self):
+    def will_it_rain(self, rain_prob_threshold=50):
         now = datetime.datetime.now()
 
         if now.hour < 5:
@@ -72,20 +72,27 @@ class Umbrella:
         try:
             response = requests.get(self.BASE_URL, params=params, timeout=10)
             response.raise_for_status()
-            data = response.json()
+            res = response.json()
 
             try:
-                items = data['response']['body']['items']['item']
-                rain_prob_threshold = 50 # 기준 강수확률
+                data = res['response']['body']['items']['item']
 
-                for item in items:
+                flag = False
+
+                for item in data:
                     if item['category'] == 'POP':
+                        fcst_date = int(item['fcstDate'])
                         fcst_time = int(item['fcstTime'])
                         fcst_prob = int(item['fcstValue'])
-                        if 600 <= fcst_time <= 2100 and fcst_prob >= rain_prob_threshold:
-                            return True
 
-                return False
+                        if fcst_date != int(base_date) or fcst_time < now.hour * 100: # 3일치 데이터가 나오기 때문에 오늘 날짜만 필터링, 현재 시간 이전의 데이터도 건너뛰기
+                            continue
+                        elif 600 <= fcst_time <= 2100 and fcst_prob >= rain_prob_threshold:
+                            flag = True
+
+                        print(f"시간: {fcst_time}    강수확률: {fcst_prob} %")
+
+                return flag
             except KeyError:
                 raise KeyError("JSON 데이터 구조 오류")
         except requests.exceptions.RequestException as e:
@@ -93,30 +100,23 @@ class Umbrella:
         except ValueError:
             raise ValueError("JSON 응답이 비어있거나 형식이 잘못되었습니다.")
         
-    async def send_rainable(self):
+    async def send_rainable(self, hour, minute, interval=60):
         while True:
             now = datetime.datetime.now()
-            if now.hour == 16 and now.minute == 46:
+            if now.hour == hour and now.minute == minute:
                 self.arduino.write(bytes("1" if self.will_it_rain() else "0", 'utf-8'))
+            await asyncio.sleep(interval)
 
 def main():
     arduino = serial.Serial(port="COM5", baudrate=9600, timeout=0.1)
 
-    alarm = Alarm(arduino)
+    alarm = Alarm(arduino=arduino)
     umbrella = Umbrella(arduino=arduino, API_KEY = "make your own ./api_key.json", NX=59, NY=125)
 
     if (input("Enter 'y' after setting up Arduino: ") == 'y'): # 입력 하고 너무 빠르게 엔터를 누르면 안 됨
         alarm.send_initial_time()
 
     # asyncio.run(umbrella.send_rainable())
-    """ if (input("Enter 'y' to send the weather: ") == 'y'):
-        try:
-            if umbrella.will_it_rain():
-                print("비가 내릴 수 있습니다.")
-            else:
-                print("비가 내리지 않을 것입니다.")
-        except Exception as e:
-            print(f"error occured: {e}") """
     
     arduino.close()
 
