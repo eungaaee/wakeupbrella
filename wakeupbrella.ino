@@ -78,8 +78,6 @@ bool IsNear(int threshold = 25) {
     Serial.println("cm");
 #endif
 
-    // delay(100);
-
     if (distance <= threshold) return true;
     else return false;
 }
@@ -231,7 +229,8 @@ void SetAlarm() {
     }
 }
 
-bool IsSleeping(int threshold = 800) {
+bool IsSleeping(int threshold = 900) {
+    // Serial.println(analogRead(pressure_pin));
     if (analogRead(pressure_pin) <= threshold) return true;
     else return false;
 }
@@ -245,7 +244,7 @@ void Alarm() {
         alarming = true;
     }
 
-    if (alarming && !watered && IsSleeping() && millis() - rang_time >= 10000) {
+    if (alarming && !watered && IsSleeping() && millis() - rang_time >= 5000) {
         Water(true);
         watered = true;
     }
@@ -334,6 +333,8 @@ void loop() {
     Umbrella();
 
     UpdateDisplay();
-    
+
+    IsSleeping();
+
     delay(100);
 }

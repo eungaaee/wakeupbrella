@@ -90,7 +90,7 @@ class Umbrella:
                         elif 600 <= fcst_time <= 2100 and fcst_prob >= rain_prob_threshold:
                             flag = True
 
-                        print(f"시간: {fcst_time}    강수확률: {fcst_prob} %")
+                        print(f"날짜: {fcst_date}    시간: {fcst_time}    강수확률: {fcst_prob} %")
 
                 return flag
             except KeyError:
@@ -117,6 +117,7 @@ def main():
         alarm.send_initial_time()
 
     # asyncio.run(umbrella.send_rainable())
+    umbrella.will_it_rain()
     
     arduino.close()
 
